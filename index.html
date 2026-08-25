@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shahmeer — SOC Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #04070a;
+    --panel: rgba(11, 18, 24, 0.9);
+    --panel-2: rgba(16, 25, 32, 0.95);
+    --border: #16332c;
+    --border-strong: #245045;
+    --text: #d6f2e8;
+    --text-secondary: #79a094;
+    --text-muted: #46655c;
+    --accent: #39ff9d;
+    --glow: rgba(57, 255, 157, 0.5);
+    --amber: #ffb454;
+    --red: #ff6b6b;
+    --blue: #5bc8ff;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'Inter', sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: var(--sans); line-height: 1.55;
+    -webkit-font-smoothing: antialiased; overflow-x: hidden;
+    min-height: 100vh;
+  }
+
+  #matrix { position: fixed; inset: 0; z-index: 0; opacity: 0.09; }
+  body::after {
+    content: ''; position: fixed; inset: 0; z-index: 50; pointer-events: none;
+    background: repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px, rgba(0,0,0,0.11) 3px, rgba(0,0,0,0) 4px);
+    mix-blend-mode: overlay;
+  }
+  a { color: inherit; text-decoration: none; }
+
+  /* ---------- Boot overlay ---------- */
+  #boot {
+    position: fixed; inset: 0; z-index: 100; background: var(--bg);
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+    font-family: var(--mono); font-size: 13px;
+  }
+  #boot-inner { width: 100%; max-width: 560px; }
+  #boot-lines div { margin-bottom: 5px; color: var(--text-secondary); }
+  #boot-lines .ok { color: var(--accent); }
+  #boot-lines .warn { color: var(--amber); }
+  #boot.done { opacity: 0; pointer-events: none; transition: opacity 0.5s ease; }
+  .boot-bar { height: 3px; background: var(--border); border-radius: 2px; margin-top: 18px; overflow: hidden; }
+  .boot-bar span { display: block; height: 100%; width: 0%; background: var(--accent); box-shadow: 0 0 10px var(--glow); transition: width 0.25s linear; }
+
+  /* ---------- Shell ---------- */
+  .shell { position: relative; z-index: 2; max-width: 1080px; margin: 0 auto; padding: 20px 20px 60px; opacity: 0; }
+  .shell.live { animation: fadeUp 0.6s ease forwards; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+  .topbar {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 12px 16px; background: var(--panel-2);
+    border: 1px solid var(--border-strong); border-radius: 10px; margin-bottom: 16px;
+    font-family: var(--mono); font-size: 12px;
+  }
+  .brand { color: var(--accent); text-shadow: 0 0 8px var(--glow); font-weight: 600; }
+  .blink { animation: blink 1.1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .stat { color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+  .stat b { color: var(--text-secondary); font-weight: 500; }
+  .pip { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px 2px var(--glow); animation: pulse 1.8s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+  .topbar .spacer { flex: 1; }
+  .topbar a { color: var(--text-secondary); transition: color .15s ease; }
+  .topbar a:hover { color: var(--accent); text-shadow: 0 0 6px var(--glow); }
+
+  .grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 16px; }
+  @media (max-width: 880px) { .grid { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--border-strong); border-radius: 10px;
+    overflow: hidden; backdrop-filter: blur(6px);
+    box-shadow: 0 0 0 1px rgba(57,255,157,.04), 0 24px 60px -28px rgba(0,0,0,.85);
+  }
+  .panel-head {
+    display: flex; align-items: center; gap: 8px; padding: 9px 14px;
+    background: var(--panel-2); border-bottom: 1px solid var(--border);
+    font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: .1em;
+  }
+  .panel-head .led { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--glow); }
+
+  /* ---------- Console ---------- */
+  #console-body {
+    font-family: var(--mono); font-size: 13px; padding: 16px 16px 8px;
+    height: 420px; overflow-y: auto; scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  #console-body::-webkit-scrollbar { width: 6px; }
+  #console-body::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+  .cline { margin-bottom: 4px; white-space: pre-wrap; word-break: break-word; }
+  .cline .prompt { color: var(--accent); }
+  .cline.dim { color: var(--text-secondary); }
+  .cline.hint { color: var(--text-muted); }
+  .cline.big { font-family: var(--sans); font-size: 27px; font-weight: 700; color: var(--text); text-shadow: 0 0 18px rgba(57,255,157,.25); margin: 6px 0 8px; }
+  .cline.accent { color: var(--accent); text-shadow: 0 0 8px var(--glow); }
+  .cline.amber { color: var(--amber); }
+  .cline a { color: var(--accent); border-bottom: 1px dotted var(--border-strong); }
+  .cline a:hover { text-shadow: 0 0 6px var(--glow); }
+  .cursor { display: inline-block; width: 7px; height: 14px; background: var(--accent); vertical-align: -2px; animation: blink .9s steps(1) infinite; }
+
+  .input-row {
+    display: flex; align-items: center; gap: 8px; padding: 11px 16px;
+    border-top: 1px solid var(--border); background: var(--panel-2);
+    font-family: var(--mono); font-size: 13px;
+  }
+  .input-row .prompt { color: var(--accent); text-shadow: 0 0 6px var(--glow); }
+  #cmd {
+    flex: 1; background: none; border: none; outline: none;
+    color: var(--text); font-family: var(--mono); font-size: 13px; padding: 0;
+  }
+  #cmd::placeholder { color: var(--text-muted); }
+
+  .chips { display: flex; gap: 7px; flex-wrap: wrap; padding: 10px 16px 13px; border-top: 1px solid var(--border); }
+  .chip {
+    font-family: var(--mono); font-size: 11px; padding: 4px 10px; border-radius: 5px;
+    border: 1px solid var(--border-strong); color: var(--text-secondary); cursor: pointer;
+    transition: border-color .15s ease, color .15s ease, box-shadow .15s ease; background: none;
+  }
+  .chip:hover { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 14px -5px var(--glow); }
+
+  /* ---------- Right column ---------- */
+  .side { display: flex; flex-direction: column; gap: 16px; }
+  #topo { width: 100%; display: block; }
+
+  #feed { font-family: var(--mono); font-size: 11.5px; padding: 10px 14px; height: 196px; overflow: hidden; }
+  .ev { display: flex; gap: 9px; padding: 4px 0; opacity: 0; animation: evIn .35s ease forwards; }
+  @keyframes evIn { from { opacity: 0; transform: translateY(-4px);} to { opacity: 1; transform: translateY(0);} }
+  .ev-t { color: var(--text-muted); flex-shrink: 0; }
+  .ev-s { flex-shrink: 0; font-weight: 600; width: 46px; }
+  .ev-s.ok { color: var(--accent); }
+  .ev-s.warn { color: var(--amber); }
+  .ev-s.crit { color: var(--red); }
+  .ev-s.info { color: var(--blue); }
+  .ev-m { color: var(--text-secondary); }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+    #matrix { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="matrix"></canvas>
+
+<div id="boot">
+  <div id="boot-inner">
+    <div id="boot-lines"></div>
+    <div class="boot-bar"><span id="bootbar"></span></div>
+  </div>
+</div>
+
+<div class="shell" id="shell">
+
+  <div class="topbar">
+    <span class="brand">shahmeer<span class="blink">_</span></span>
+    <span class="stat"><span class="pip"></span> <b>OPERATIONAL</b></span>
+    <span class="stat">uptime <b id="uptime">00:00:00</b></span>
+    <span class="stat">nodes <b>4</b></span>
+    <span class="stat">status <b style="color:var(--accent)">open to work</b></span>
+    <span class="spacer"></span>
+    <a href="https://github.com/shahmeer13" target="_blank" rel="noopener">github</a>
+    <a href="https://www.linkedin.com/in/mohammed-shahmeer-36557a345" target="_blank" rel="noopener">linkedin</a>
+    <a href="https://medium.com/@shahmeermuhammad19" target="_blank" rel="noopener">medium</a>
+  </div>
+
+  <div class="grid">
+
+    <div class="panel">
+      <div class="panel-head"><span class="led"></span> console — shahmeer@soc-lab</div>
+      <div id="console-body"></div>
+      <div class="input-row">
+        <span class="prompt">$</span>
+        <input id="cmd" autocomplete="off" spellcheck="false" placeholder="type a command, or click one below…" />
+      </div>
+      <div class="chips">
+        <button class="chip" data-cmd="whoami">whoami</button>
+        <button class="chip" data-cmd="certs">certs</button>
+        <button class="chip" data-cmd="homelab">homelab</button>
+        <button class="chip" data-cmd="writeups">writeups</button>
+        <button class="chip" data-cmd="contact">contact</button>
+        <button class="chip" data-cmd="help">help</button>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="panel">
+        <div class="panel-head"><span class="led"></span> homelab topology</div>
+        <canvas id="topo" height="230"></canvas>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="led"></span> live event feed</div>
+        <div id="feed"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(function() {
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- matrix ---------- */
+  if (!reduce) {
+    var mc = document.getElementById('matrix'), mx = mc.getContext('2d');
+    var mw, mh, mcols, mdrops;
+    var mchars = 'アイウエオカキクケコサシスセソ01{}[]<>/;$#SOCKQL';
+    function mresize() {
+      mw = mc.width = window.innerWidth; mh = mc.height = window.innerHeight;
+      mcols = Math.floor(mw / 16);
+      mdrops = new Array(mcols).fill(0).map(function(){ return Math.random() * -50; });
+    }
+    mresize(); window.addEventListener('resize', mresize);
+    (function mdraw() {
+      mx.fillStyle = 'rgba(4,7,10,0.06)'; mx.fillRect(0, 0, mw, mh);
+      mx.fillStyle = '#39ff9d'; mx.font = '14px monospace';
+      for (var i = 0; i < mcols; i++) {
+        mx.fillText(mchars.charAt(Math.floor(Math.random()*mchars.length)), i*16, mdrops[i]*16);
+        if (mdrops[i]*16 > mh && Math.random() > 0.975) mdrops[i] = 0;
+        mdrops[i]++;
+      }
+      requestAnimationFrame(mdraw);
+    })();
+  }
+
+  /* ---------- boot ---------- */
+  var bootLines = [
+    { t: 'initializing soc console…', c: '' },
+    { t: 'mounting /var/log/homelab', c: 'ok' },
+    { t: 'splunk forwarder … connected', c: 'ok' },
+    { t: 'microsoft sentinel … 12 detection rules loaded', c: 'ok' },
+    { t: 'nessus scanner … idle', c: 'warn' },
+    { t: 'operator profile: shahmeer', c: 'ok' },
+    { t: 'console ready', c: 'ok' }
+  ];
+  var bootEl = document.getElementById('boot-lines');
+  var bar = document.getElementById('bootbar');
+  var bi = 0;
+
+  function bootStep() {
+    if (bi >= bootLines.length) {
+      setTimeout(function() {
+        document.getElementById('boot').classList.add('done');
+        document.getElementById('shell').classList.add('live');
+        startConsole(); startFeed(); startTopo(); startUptime();
+      }, 350);
+      return;
+    }
+    var l = bootLines[bi];
+    var d = document.createElement('div');
+    d.className = l.c;
+    d.textContent = (l.c === 'ok' ? '[  OK  ] ' : l.c === 'warn' ? '[ WARN ] ' : '[ .... ] ') + l.t;
+    bootEl.appendChild(d);
+    bi++;
+    bar.style.width = Math.round((bi / bootLines.length) * 100) + '%';
+    setTimeout(bootStep, reduce ? 0 : 260);
+  }
+  bootStep();
+
+  /* ---------- uptime ---------- */
+  function startUptime() {
+    var start = Date.now();
+    setInterval(function() {
+      var s = Math.floor((Date.now() - start) / 1000);
+      var hh = String(Math.floor(s/3600)).padStart(2,'0');
+      var mm = String(Math.floor((s%3600)/60)).padStart(2,'0');
+      var ss = String(s%60).padStart(2,'0');
+      document.getElementById('uptime').textContent = hh+':'+mm+':'+ss;
+    }, 1000);
+  }
+
+  /* ---------- console ---------- */
+  var cb = document.getElementById('console-body');
+  var input = document.getElementById('cmd');
+
+  function out(html, cls) {
+    var d = document.createElement('div');
+    d.className = 'cline' + (cls ? ' ' + cls : '');
+    d.innerHTML = html;
+    cb.appendChild(d);
+    cb.scrollTop = cb.scrollHeight;
+    return d;
+  }
+
+  function typeLine(text, cb2) {
+    if (reduce) { out('<span class="prompt">$</span> ' + text); cb2 && cb2(); return; }
+    var d = out('<span class="prompt">$</span> <span class="tx"></span><span class="cursor"></span>');
+    var tx = d.querySelector('.tx'), cur = d.querySelector('.cursor'), i = 0;
+    (function t() {
+      if (i <= text.length) { tx.textContent = text.slice(0, i); i++; cb.scrollTop = cb.scrollHeight; setTimeout(t, 45); }
+      else { cur.remove(); cb2 && cb2(); }
+    })();
+  }
+
+  var responses = {
+    whoami: function() {
+      out('Shahmeer', 'big');
+      out('Cybersecurity — SOC &amp; GRC', 'accent');
+      out('Sheridan College grad building hands-on detection and response experience through a self-built homelab, working toward vCISO-level GRC consulting.', 'dim');
+      out('&nbsp;');
+    },
+    certs: function() {
+      out('CERTIFICATIONS', 'hint');
+      out('  <span style="color:var(--accent)">[✓]</span> CompTIA Security+ <span class="hint">SY0-701</span>', 'dim');
+      out('  <span style="color:var(--accent)">[✓]</span> Google IT Support Professional Certificate', 'dim');
+      out('  <span style="color:var(--accent)">[✓]</span> SAP Ariba Sourcing', 'dim');
+      out('&nbsp;');
+    },
+    homelab: function() {
+      out('HOMELAB — detect / respond / assess', 'hint');
+      out('  <span class="accent">DETECT</span>   Splunk + Microsoft Sentinel', 'dim');
+      out('           Custom KQL detection rules built and tuned against simulated attack activity.', 'dim');
+      out('  <span class="amber">RESPOND</span>  DWAgent incident remediation', 'dim');
+      out('           Assisted in remediating a real-world incident, not a simulated exercise.', 'dim');
+      out('  <span style="color:var(--blue)">ASSESS</span>   Nessus vulnerability scans', 'dim');
+      out('           Scanning and prioritization across the lab environment.', 'dim');
+      out('&nbsp;');
+    },
+    writeups: function() {
+      out('FIELD NOTES — medium.com/@shahmeermuhammad19', 'hint');
+      out('  01  <a href="https://medium.com/@shahmeermuhammad19" target="_blank" rel="noopener">Detecting lateral movement with KQL</a>', 'dim');
+      out('  02  <a href="https://medium.com/@shahmeermuhammad19" target="_blank" rel="noopener">Remediating a real DWAgent incident</a>', 'dim');
+      out('  03  <a href="https://medium.com/@shahmeermuhammad19" target="_blank" rel="noopener">Building a SOC homelab from scratch</a>', 'dim');
+      out('&nbsp;');
+    },
+    contact: function() {
+      out('CONTACT', 'hint');
+      out('  email     <a href="mailto:shahmeermuhammad19@gmail.com">shahmeermuhammad19@gmail.com</a>', 'dim');
+      out('  linkedin  <a href="https://www.linkedin.com/in/mohammed-shahmeer-36557a345" target="_blank" rel="noopener">/in/mohammed-shahmeer</a>', 'dim');
+      out('  github    <a href="https://github.com/shahmeer13" target="_blank" rel="noopener">github.com/shahmeer13</a>', 'dim');
+      out('  medium    <a href="https://medium.com/@shahmeermuhammad19" target="_blank" rel="noopener">@shahmeermuhammad19</a>', 'dim');
+      out('&nbsp;');
+    },
+    help: function() {
+      out('AVAILABLE COMMANDS', 'hint');
+      out('  whoami     who I am and what I do', 'dim');
+      out('  certs      certifications held', 'dim');
+      out('  homelab    lab stack and what it covers', 'dim');
+      out('  writeups   published field notes', 'dim');
+      out('  contact    how to reach me', 'dim');
+      out('  clear      clear the console', 'dim');
+      out('&nbsp;');
+    },
+    clear: function() { cb.innerHTML = ''; }
+  };
+
+  function runCmd(raw) {
+    var c = raw.trim().toLowerCase();
+    if (!c) return;
+    typeLine(c, function() {
+      if (responses[c]) responses[c]();
+      else {
+        out('command not found: ' + c, 'amber');
+        out('type <span class="accent">help</span> to see available commands', 'hint');
+        out('&nbsp;');
+      }
+    });
+  }
+
+  function startConsole() {
+    out('SOC console v1.0 — operator: shahmeer', 'hint');
+    out('type <span class="accent">help</span> for commands, or click one below', 'hint');
+    out('&nbsp;');
+    setTimeout(function() { runCmd('whoami'); }, 500);
+    input.focus();
+  }
+
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { runCmd(input.value); input.value = ''; }
+  });
+  document.querySelectorAll('.chip').forEach(function(btn) {
+    btn.addEventListener('click', function() { runCmd(btn.dataset.cmd); input.focus(); });
+  });
+
+  /* ---------- topology ---------- */
+  function startTopo() {
+    var c = document.getElementById('topo'), x = c.getContext('2d');
+    function fit() { c.width = c.parentElement.clientWidth; }
+    fit(); window.addEventListener('resize', fit);
+
+    var nodes = [
+      { id:'AD',      label:'AD / Entra', px:0.20, py:0.28 },
+      { id:'SPLUNK',  label:'Splunk',     px:0.72, py:0.22 },
+      { id:'SENTINEL',label:'Sentinel',   px:0.75, py:0.68 },
+      { id:'NESSUS',  label:'Nessus',     px:0.24, py:0.76 }
+    ];
+    var edges = [[0,1],[0,3],[1,2],[3,2],[0,2]];
+    var pkts = edges.map(function(e, i) { return { e: e, t: Math.random(), sp: 0.0035 + Math.random()*0.003 }; });
+
+    function pos(n) { return { x: n.px * c.width, y: n.py * c.height }; }
+
+    (function draw() {
+      x.clearRect(0, 0, c.width, c.height);
+
+      x.strokeStyle = 'rgba(57,255,157,0.16)'; x.lineWidth = 1;
+      edges.forEach(function(e) {
+        var a = pos(nodes[e[0]]), b = pos(nodes[e[1]]);
+        x.beginPath(); x.moveTo(a.x, a.y); x.lineTo(b.x, b.y); x.stroke();
+      });
+
+      if (!reduce) {
+        pkts.forEach(function(p) {
+          var a = pos(nodes[p.e[0]]), b = pos(nodes[p.e[1]]);
+          var px2 = a.x + (b.x - a.x) * p.t, py2 = a.y + (b.y - a.y) * p.t;
+          x.beginPath(); x.arc(px2, py2, 2.6, 0, Math.PI*2);
+          x.fillStyle = '#39ff9d'; x.shadowColor = '#39ff9d'; x.shadowBlur = 8;
+          x.fill(); x.shadowBlur = 0;
+          p.t += p.sp; if (p.t > 1) p.t = 0;
+        });
+      }
+
+      nodes.forEach(function(n) {
+        var p = pos(n);
+        x.beginPath(); x.arc(p.x, p.y, 6, 0, Math.PI*2);
+        x.fillStyle = '#04070a'; x.fill();
+        x.strokeStyle = '#39ff9d'; x.lineWidth = 1.5;
+        x.shadowColor = '#39ff9d'; x.shadowBlur = 10; x.stroke(); x.shadowBlur = 0;
+        x.fillStyle = '#79a094'; x.font = '10px JetBrains Mono, monospace';
+        x.textAlign = 'center';
+        x.fillText(n.label, p.x, p.y - 12);
+      });
+
+      requestAnimationFrame(draw);
+    })();
+  }
+
+  /* ---------- live feed ---------- */
+  function startFeed() {
+    var feed = document.getElementById('feed');
+    var events = [
+      ['ok','sentinel','kql rule matched — no action needed'],
+      ['info','splunk','ingested 1,204 events from endpoint'],
+      ['warn','nessus','medium severity finding on lab host'],
+      ['ok','ad','group policy sync completed'],
+      ['info','sentinel','analytics rule evaluation cycle'],
+      ['ok','splunk','forwarder heartbeat received'],
+      ['crit','sentinel','simulated lateral movement detected'],
+      ['ok','nessus','scan queued for lab subnet'],
+      ['info','ad','new test account provisioned'],
+      ['ok','sentinel','incident triaged and closed']
+    ];
+    var i = 0;
+    function push() {
+      var e = events[i % events.length];
+      var now = new Date();
+      var ts = String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0')+':'+String(now.getSeconds()).padStart(2,'0');
+      var d = document.createElement('div');
+      d.className = 'ev';
+      d.innerHTML = '<span class="ev-t">'+ts+'</span><span class="ev-s '+e[0]+'">'+e[0].toUpperCase()+'</span><span class="ev-m">'+e[1]+' — '+e[2]+'</span>';
+      feed.insertBefore(d, feed.firstChild);
+      while (feed.children.length > 9) feed.removeChild(feed.lastChild);
+      i++;
+    }
+    for (var k = 0; k < 6; k++) push();
+    if (!reduce) setInterval(push, 2800);
+  }
+})();
+</script>
+
+</body>
+</html>
